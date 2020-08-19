@@ -6,6 +6,7 @@ import base64
 import fnmatch
 import sys
 import plistlib
+import subprocess
 from zipfile import ZipFile
 from flask import Flask, render_template, request, redirect, url_for, abort
 from werkzeug.utils import secure_filename
@@ -16,7 +17,9 @@ app = Flask(__name__)
 app.config['UPLOAD_EXTENSIONS'] = ['.ipa', ]
 app.config['PATCHED_PATH'] = 'patched'
 app.config['TMP_PATH'] = '.tmp'
+app.config['SAMPLE_PATH'] = '.tmp'
 
+CODE_SIGNATURE = "9B362C2C317D4FFE7474768C8E7625C54ECDD5E4"
 HOSTNAME = "frida.pentestlabs.co.uk"
 INSTALL_TEMPLATE = Template("""
 <html><body>
@@ -71,15 +74,30 @@ def parse_ipa_info(ipa_file):
     return info
 
 def patch(original_ipa):
-    #generate new template ipa
+    #generate a new build - `xcodebuild -project sampleapp.xcodeproj/ build`
+    output = subprocess.run(["xcodebuild", "-project", "sampleapp/sampleapp.xcodeproj", "build"])
+    print(output)
 
-    #generate new provisioning profile
-
-    #get code singing signature
-    #security find-identity -p codesigning OR 9B362C2C317D4FFE7474768C8E7625C54ECDD5E4
+    #extract provising profile
+    print("Rebuilding sample IPA")
+    sample_ipa = os.path.join(app.config['SAMPLE_PATH'], "build/Release-iphoneos/sampleapp.ipa")
+    print("Built: {}".format(sample_ipa))
+    sample_zip = ZipFile(sample_ipa)
+    files = sample_zip.namelist()
+    provisioning_profile_content = fnmatch.filter(files, "embedded.mobileprovision")[0]
+    print("Extracted provisioning profile")
+    sample_zip.close()
+    new_profile_path = open(os.path.join(app.config['PATCH_PATH'], "build/Release-iphoneos/embedded.mobileprovision"))
+    provisioning_profile_file = open(new_profile_path, "w")
+    provisioning_profile_file.write(provisioning_profile_content)
+    provisioning_profile_file.close()
+    print("Profile saved to: {}".format(new_profile_path))
 
     #patch with objection
     #objection patchipa --source <original ipa> --codesign-signature <signature> -P <provisioning file>
+    print("Patching .ipa with objection")
+    output = subprocess.run(["objection", "--source", original_ipa, "--codesign-signature", CODE_SIGNATURE, "-P", new_profile_path])
+    print(output)
 
     return ""
 
